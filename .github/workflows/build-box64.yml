@@ -58,6 +58,13 @@ jobs:
           # 确认是 aarch64 ELF
           file box64 | grep -q "ARM aarch64" || { echo "NOT aarch64!"; exit 1; }
 
+      - name: Strip debug symbols
+        run: |
+          cd box64/build
+          # 剥离 -g 调试符号，体积从 ~85MB 降到 ~25MB（对齐 box64-android 发布尺寸）
+          aarch64-linux-gnu-strip --strip-debug box64
+          ls -la box64
+
       - name: Package
         run: |
           mkdir -p dist
