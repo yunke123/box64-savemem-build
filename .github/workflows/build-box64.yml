@@ -1,0 +1,79 @@
+name: Build box64 (SAVE_MEM + BAD_SIGNAL)
+
+# 手动触发或推代码触发。产出带 -DSAVE_MEM=ON -DBAD_SIGNAL=ON 的 box64 arm64 二进制，
+# 供 RK3566 LoongOS 掌机运行 Unity 游戏《王国：两位君主》时降低 box64 自身内存占用。
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-11-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu libc6-dev-arm64-cross \
+            cmake make git
+
+      - name: Clone box64
+        run: |
+          git clone --depth 1 https://github.com/ptitSeb/box64.git
+          echo "BOX64_COMMIT=$(git -C box64 rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cd box64
+          mkdir -p build && cd build
+          # 对齐 ryanfortner/box64-debs 已验证的交叉编译配置，
+          # 仅追加 -DSAVE_MEM=ON（box64 纯 C，无需 CXX 编译器）
+          cmake .. \
+            -DBAD_SIGNAL=ON \
+            -DSAVE_MEM=ON \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc-11 \
+            -DARM_DYNAREC=ON \
+            -DBOX32=1 \
+            -DBOX32_BINFMT=1
+
+      - name: Build
+        run: |
+          cd box64/build
+          make -j$(nproc)
+
+      - name: Verify binary
+        run: |
+          cd box64/build
+          file box64
+          ls -la box64
+          # 确认是 aarch64 ELF
+          file box64 | grep -q "ARM aarch64" || { echo "NOT aarch64!"; exit 1; }
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp box64/build/box64 dist/box64-savemem
+          cd dist
+          tar czf box64-savemem-arm64.tar.gz box64-savemem
+          ls -la
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: box64-savemem-${{ env.BOX64_COMMIT }}
+          path: dist/box64-savemem-arm64.tar.gz
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/box64-savemem-arm64.tar.gz
